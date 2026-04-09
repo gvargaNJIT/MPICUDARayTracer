@@ -12,7 +12,7 @@
 #include <vector>
 #include <algorithm>
 
-color ray_color(const ray& r, const physical& world, const std::vector<material>& materials, int depth) {
+color ray_color(const ray& r, const physical_list& world, const std::vector<material>& materials, int depth) {
     hit_record rec;
 
     if (depth <= 0)

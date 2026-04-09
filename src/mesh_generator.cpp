@@ -1,10 +1,9 @@
 #include "../include/mesh_generator.h"
 #include <cmath>
-#include <memory>
 
-std::vector<std::shared_ptr<triangle>> mesh_generator::generate_sphere(const vec3& center, double radius, int lat_steps, int long_steps, int material_id){
+std::vector<triangle> mesh_generator::generate_sphere(const vec3& center, double radius, int lat_steps, int long_steps, int material_id){
     std::vector<vec3> vertices;
-    std::vector<std::shared_ptr<triangle>> tris;
+    std::vector<triangle> tris;
 
     for (int i = 0; i <= lat_steps; ++i) {
         double theta = i * M_PI / lat_steps;
@@ -22,8 +21,8 @@ std::vector<std::shared_ptr<triangle>> mesh_generator::generate_sphere(const vec
             int first = i * (long_steps + 1) + j;
             int second = first + long_steps + 1;
 
-            tris.push_back(std::make_shared<triangle>(vertices[first], vertices[second], vertices[first + 1], material_id));
-            tris.push_back(std::make_shared<triangle>(vertices[second], vertices[second + 1], vertices[first + 1], material_id));
+            tris.push_back(triangle(vertices[first], vertices[second], vertices[first + 1], material_id));
+            tris.push_back(triangle(vertices[second], vertices[second + 1], vertices[first + 1], material_id));
         }
     }
 

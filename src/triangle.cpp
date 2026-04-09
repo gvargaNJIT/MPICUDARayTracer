@@ -12,7 +12,7 @@ triangle::triangle(const point3& a, const point3& b, const point3& c, int m)
     normal = unit_vector(cross(v1 - v0, v2 - v0));
 }
 
-HD bool triangle::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+HD bool triangle::hit(const ray& r, double t_min, double t_max, hit_record& rec) const{
     vec3 edge1 = v1 - v0;
     vec3 edge2 = v2 - v0;
     vec3 h = cross(r.direction(), edge2);
