@@ -1,12 +1,18 @@
 #include "../include/triangle.h"
 #include <cmath>
 
+#ifdef __CUDACC__
+#define HD __host__ __device__
+#else
+#define HD
+#endif
+
 triangle::triangle(const point3& a, const point3& b, const point3& c, int m)
     : v0(a), v1(b), v2(c), material_id(m) {
     normal = unit_vector(cross(v1 - v0, v2 - v0));
 }
 
-bool triangle::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+HD bool triangle::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
     vec3 edge1 = v1 - v0;
     vec3 edge2 = v2 - v0;
     vec3 h = cross(r.direction(), edge2);
