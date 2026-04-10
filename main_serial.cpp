@@ -70,10 +70,11 @@ int main() {
     ground_material.type   = materialType::LAMBERT;
     ground_material.albedo = color(0.8, 0.8, 0.0);
     materials.push_back(ground_material);
-    double ground_radius = 1000.0;
-    point3 ground_center(0, -1001, 0);
 
-    auto ground_mesh = mesh_generator::generate_sphere(ground_center, ground_radius, 20, 20, 3);
+    double ground_side = 2000.0;
+    point3 ground_center(0, -1001, 0); 
+
+    auto ground_mesh = mesh_generator::generate_cube(ground_center, ground_side, 3);
 
     for (auto& tri : ground_mesh) {
         world.add(tri);

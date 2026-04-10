@@ -7,4 +7,5 @@
 class mesh_generator {
   public:
     static std::vector<triangle> generate_sphere(const vec3& center, double radius, int lat_steps, int long_steps, int material_id);
+    static std::vector<triangle> generate_cube(const vec3& center, double side, int material_id);
 };

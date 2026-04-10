@@ -12,10 +12,10 @@
 class triangle {
   public:
     HD triangle() {}
-    HD triangle(const point3& a, const point3& b, const point3& c, int m)
-        : v0(a), v1(b), v2(c), material_id(m) {
+    HD triangle(const point3& a, const point3& b, const point3& c, const point3& na, const point3& nb, const point3& nc, int m)
+        : v0(a), v1(b), v2(c), n0(na), n1(nb), n2(nc), material_id(m) { 
         normal = unit_vector(cross(v1 - v0, v2 - v0));
-    }
+        }
 
     HD bool hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
         vec3 edge1 = v1 - v0;
@@ -38,7 +38,7 @@ class triangle {
 
         rec.t = t;
         rec.p = r.at(t);
-        rec.normal = unit_vector(cross(edge1, edge2));
+        rec.normal = unit_vector((1 - u - v) * n0 + u * n1 + v * n2);
         rec.set_face_normal(r, rec.normal);
         rec.material_id = material_id;
         return true;
@@ -46,6 +46,7 @@ class triangle {
 
   private:
     point3 v0, v1, v2;
+    point3 n0, n1, n2;
     vec3 normal;
     int material_id;
 };
