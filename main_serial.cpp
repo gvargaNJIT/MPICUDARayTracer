@@ -107,5 +107,5 @@ int main() {
             image_data.push_back(static_cast<unsigned char>(255.999 * clamp(pixel_color.z(), 0.0, 1.0)));
         }
     }
-    image_ppm("output.ppm", image_data, image_width, image_height);
+    image_ppm("outputser.ppm", image_data, image_width, image_height);
 }

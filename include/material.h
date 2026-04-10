@@ -17,13 +17,36 @@ struct material {
     vec3 emit_color;
 };
 
-HD inline bool scatter(const material& mat, const ray& r_in, const vec3& hit_point, const vec3& normal, vec3& attenuation, ray& scattered){
+#ifdef __CUDACC__
+__device__ inline bool scatter(const material& mat, const ray& r_in, const vec3& hit_point, const vec3& normal, vec3& attenuation, ray& scattered, curandState* state){
+    switch(mat.type) {
+        case materialType::LAMBERT: {
+            vec3 scatter_dir = normal + random_unit_vector(state);
+            if(scatter_dir.near_zero())
+                scatter_dir = normal;
+            scattered = ray(hit_point, scatter_dir);
+            attenuation = mat.albedo;
+            return true;
+        }
+        case materialType::METAL: {
+            vec3 reflected = reflect(unit_vector(r_in.direction()), normal);
+            scattered = ray(hit_point, reflected + mat.fuzz*random_unit_vector(state));
+            attenuation = mat.albedo;
+            return (dot(scattered.direction(), normal) > 0);
+        }
+        case materialType::EMISSIVE: {
+            return false;
+        }
+    }
+    return false;
+}
+#else
+inline bool scatter(const material& mat, const ray& r_in, const vec3& hit_point, const vec3& normal, vec3& attenuation, ray& scattered){
     switch(mat.type) {
         case materialType::LAMBERT: {
             vec3 scatter_dir = normal + random_unit_vector();
-            if(scatter_dir.near_zero()){
+            if(scatter_dir.near_zero())
                 scatter_dir = normal;
-            }
             scattered = ray(hit_point, scatter_dir);
             attenuation = mat.albedo;
             return true;
@@ -40,6 +63,7 @@ HD inline bool scatter(const material& mat, const ray& r_in, const vec3& hit_poi
     }
     return false;
 }
+#endif
 
 HD inline vec3 emitted(const material& mat) {
     if (mat.type == materialType::EMISSIVE)
