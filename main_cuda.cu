@@ -7,6 +7,7 @@
 #include "include/material.h"
 #include "include/image_maker.h"
 #include "include/camera.h"
+#include "include/bvh.h"
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -19,10 +20,9 @@ const int image_width = 400;
 const int image_height = static_cast<int>(image_width / aspect_ratio);
 const int samples_per_pixel = 10;
 
-const int grid_dim = image_width*image_height*samples_per_pixel;
 const int block_size = 16;
 
-__global__ void ray_color(camera* cam, triangle* world, int num_triangles, material* materials, vec3* d_image, int depth) {
+__global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_triangles, material* materials, vec3* d_image, int depth) {
     curandState state;
     hit_record rec;
     int col = threadIdx.x+blockDim.x*blockIdx.x;
@@ -39,32 +39,21 @@ __global__ void ray_color(camera* cam, triangle* world, int num_triangles, mater
     vec3 attenuation = color(1.0, 1.0, 1.0);
 
     for (int i = 0; i < depth; i++) {
-        ray scattered;
-        color bounce_attenuation;
-        hit_record temp_rec;
-        bool hit_anything = false;
-        double closest = 1e30;
-
-        for (int t = 0; t < num_triangles; t++) {
-            if (world[t].hit(r, 0.001, closest, temp_rec)) {
-                hit_anything = true;
-                closest = temp_rec.t;
-                rec = temp_rec;
-            }
-        }
-
-        if (hit_anything) {
+        hit_record rec;
+        
+        if (bvh_hit(r, 0.001, 1e30, rec, nodes, world)) {
+            ray scattered;
+            color bounce_attenuation;
             color emitted_light = emitted(materials[rec.material_id]);
             result += attenuation * emitted_light;
+
             if (scatter(materials[rec.material_id], r, rec.p, rec.normal, bounce_attenuation, scattered, &state)) {
                 attenuation *= bounce_attenuation;
                 r = scattered;
-            } 
-            else {
+            } else {
                 break;
             }
-        }
-        else {
+        } else {
             vec3 unit_dir = unit_vector(r.direction());
             double t = 0.5*(unit_dir.y() + 1.0);
             result += attenuation * ((1.0-t)*color(1.0,1.0,1.0) + t*color(0.5,0.7,1.0));
@@ -119,6 +108,9 @@ int main() {
         world.add(tri);
     }
 
+    std::vector<bvh> h_nodes;
+    build(world.objects, 0, world.objects.size(), h_nodes);
+
     triangle* h_triangles = world.objects.data();
     int num_triangles = world.objects.size();
 
@@ -129,20 +121,23 @@ int main() {
     material* d_materials;
     camera* d_cam;
     vec3* h_image = new vec3[image_width * image_height * samples_per_pixel];
+    bvh* d_nodes;
 
+    cudaMalloc(&d_nodes, h_nodes.size() * sizeof(bvh));
     cudaMalloc(&d_image, image_height*image_width*samples_per_pixel * sizeof(vec3));
     cudaMalloc(&d_triangles, num_triangles * sizeof(triangle));
     cudaMalloc(&d_materials, materials.size() * sizeof(material));
     cudaMalloc(&d_cam, sizeof(camera));
 
-    cudaMemcpy(d_triangles, h_triangles, num_triangles * sizeof(triangle), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_triangles, world.objects.data(), num_triangles * sizeof(triangle), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_nodes, h_nodes.data(), h_nodes.size() * sizeof(bvh), cudaMemcpyHostToDevice);
     cudaMemcpy(d_materials, h_materials, materials.size() * sizeof(material), cudaMemcpyHostToDevice);
     cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
     dim3 block(block_size, block_size, 1);
     dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
 
-    ray_color<<<grid, block>>>(d_cam, d_triangles, num_triangles, d_materials, d_image, 4);
+    ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, num_triangles, d_materials, d_image, 4);
 
     cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
 
@@ -175,5 +170,6 @@ int main() {
     cudaFree(d_triangles);
     cudaFree(d_materials);
     cudaFree(d_cam);
+    cudaFree(d_nodes);
     delete[] h_image;
 }

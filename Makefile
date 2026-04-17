@@ -2,8 +2,9 @@ CXX      = g++
 NVCC     = nvcc
 CXXFLAGS = -O3 -std=c++17 -Iinclude
 NVCCFLAGS = -O3 -std=c++17 -Iinclude
+MPIXX    = mpic++
 
-COMMON_SRCS = src/mesh_generator.cpp src/image_maker.cpp
+COMMON_SRCS = src/mesh_generator.cpp src/image_maker.cpp src/bvh_cpu.cpp
 
 serial: $(COMMON_SRCS) main_serial.cpp
 	$(CXX) $(CXXFLAGS) -o main_serial main_serial.cpp $(COMMON_SRCS)

@@ -7,23 +7,26 @@
 #include "include/material.h"
 #include "include/image_maker.h"
 #include "include/camera.h"
+#include "include/bvh.h"
 #include <iostream>
 #include <memory>
 #include <vector>
 #include <algorithm>
 
-color ray_color(const ray& r, const physical_list& world, const std::vector<material>& materials, int depth) {
+color ray_color(const ray& r, const std::vector<bvh>& nodes, const std::vector<triangle>& tris, const std::vector<material>& materials, int depth) {
     hit_record rec;
 
     if (depth <= 0)
         return color(0,0,0);
 
-    if (world.hit(r, 0.001, std::numeric_limits<double>::infinity(), rec)) {
+    if (bvh_hit(r, 0.001, std::numeric_limits<double>::infinity(), rec, nodes.data(), tris.data())) {
         ray scattered;
         color attenuation;
         color emitted_light = emitted(materials[rec.material_id]);
+        
         if (scatter(materials[rec.material_id], r, rec.p, rec.normal, attenuation, scattered))
-            return emitted_light + attenuation * ray_color(scattered, world, materials, depth-1);
+            return emitted_light + attenuation * ray_color(scattered, nodes, tris, materials, depth-1);
+        
         return emitted_light;
     }
 
@@ -80,6 +83,9 @@ int main() {
         world.add(tri);
     }
 
+    std::vector<bvh> flat_nodes;
+    build(world.objects, 0, world.objects.size(), flat_nodes);
+
     std::vector<unsigned char> image_data;
     image_data.reserve(image_width * image_height * 3);
 
@@ -92,7 +98,7 @@ int main() {
                 double u = (i + vec3::random().x()) / (image_width - 1);
                 double v = (j + vec3::random().y()) / (image_height - 1);
                 ray r = cam.get_ray(u, v);
-                pixel_color += ray_color(r, world, materials, 5);
+                pixel_color += ray_color(r, flat_nodes, world.objects, materials, 5);
             }
 
             pixel_color /= double(samples_per_pixel);

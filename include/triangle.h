@@ -2,6 +2,7 @@
 #include "physical.h"
 #include "material.h"
 #include "vec3.h"
+#include "aabb.h"
 
 #ifdef __CUDACC__
 #define HD __host__ __device__
@@ -43,6 +44,26 @@ class triangle {
         rec.material_id = material_id;
         return true;
     }
+
+    HD aabb bounding_box() const {
+      point3 min_pt(
+          fmin(v0.x(), fmin(v1.x(), v2.x())),
+          fmin(v0.y(), fmin(v1.y(), v2.y())),
+          fmin(v0.z(), fmin(v1.z(), v2.z()))
+      );
+
+      point3 max_pt(
+          fmax(v0.x(), fmax(v1.x(), v2.x())),
+          fmax(v0.y(), fmax(v1.y(), v2.y())),
+          fmax(v0.z(), fmax(v1.z(), v2.z()))
+      );
+
+      const double eps = 1e-4;
+      max_pt = max_pt + vec3(eps, eps, eps);
+      min_pt = min_pt - vec3(eps, eps, eps);
+
+      return aabb(min_pt, max_pt);
+  }
 
   private:
     point3 v0, v1, v2;
