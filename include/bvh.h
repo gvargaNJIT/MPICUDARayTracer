@@ -33,7 +33,7 @@ inline aabb surrounding_box(const aabb& a, const aabb& b) {
     return aabb(small, big);
 }
 
-HD inline bool bvh_hit(const ray& r, double t_min, double t_max, hit_record& rec, const bvh* all_nodes, const triangle* all_tris) {
+HD inline bool bvh_hit(const ray& r, double t_min, double t_max, hit_record& rec, const bvh* all_nodes, const bvh* s_nodes, int num_s_nodes, const triangle* all_tris) {
     int stack[64]; 
     int stack_ptr = 0;
     stack[stack_ptr++] = 0;
@@ -43,7 +43,7 @@ HD inline bool bvh_hit(const ray& r, double t_min, double t_max, hit_record& rec
 
     while (stack_ptr > 0) {
         int idx = stack[--stack_ptr];
-        const bvh& node = all_nodes[idx];
+        const bvh node = (idx < num_s_nodes) ? s_nodes[idx] : all_nodes[idx];
 
         if (node.box.hit(r, t_min, closest_so_far)) {
             if (node.is_leaf()) {

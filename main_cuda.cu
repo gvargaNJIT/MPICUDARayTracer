@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <curand_kernel.h>
 
+#define HOT_NODES 64
+
 const double aspect_ratio = 16.0 / 9.0;
 const int image_width = 400;
 const int image_height = static_cast<int>(image_width / aspect_ratio);
@@ -22,26 +24,45 @@ const int samples_per_pixel = 10;
 
 const int block_size = 16;
 
-__global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_triangles, material* materials, vec3* d_image, int depth) {
+__global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_nodes, int num_triangles, material* materials, vec3* d_image, int depth) {
     curandState state;
-    hit_record rec;
     int col = threadIdx.x+blockDim.x*blockIdx.x;
     int row = threadIdx.y+blockDim.y*blockIdx.y;
     int dep = threadIdx.z+blockDim.z*blockIdx.z;
+    int tid = threadIdx.y * blockDim.x + threadIdx.x;
+
+    __shared__ char s_cam_buf[sizeof(camera)];
+    __shared__ bvh s_nodes[HOT_NODES];
+    camera* s_cam = reinterpret_cast<camera*>(s_cam_buf);
+
+    if (tid == 0)
+        *s_cam = *cam;
+    __syncthreads();
+
+    int nodes_to_cache = min(HOT_NODES, num_nodes);
+    if (tid < nodes_to_cache)
+        s_nodes[tid] = nodes[tid];
+
+    __syncthreads();
+
+    if (col >= image_width || row >= image_height){
+        return;
+    }
+
     int idx = dep * image_height * image_width + row * image_width + col;
     curand_init(1234, idx, 0, &state);
 
     vec3 result = color(0,0,0);
     double u = (col + curand_uniform(&state)) / (image_width - 1);
     double v = (row + curand_uniform(&state)) / (image_height - 1);
-    ray r = cam->get_ray(u, v);
+    ray r = s_cam->get_ray(u, v);
 
     vec3 attenuation = color(1.0, 1.0, 1.0);
 
     for (int i = 0; i < depth; i++) {
         hit_record rec;
         
-        if (bvh_hit(r, 0.001, 1e30, rec, nodes, world)) {
+        if (bvh_hit(r, 0.001, 1e30, rec, nodes, s_nodes, nodes_to_cache, world)) {
             ray scattered;
             color bounce_attenuation;
             color emitted_light = emitted(materials[rec.material_id]);
@@ -137,7 +158,7 @@ int main() {
     dim3 block(block_size, block_size, 1);
     dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
 
-    ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, num_triangles, d_materials, d_image, 4);
+    ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
 
     cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
 
