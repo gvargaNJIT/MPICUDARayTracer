@@ -12,6 +12,12 @@ serial: $(COMMON_SRCS) main_serial.cpp
 cuda: $(COMMON_SRCS) main_cuda.cu
 	$(NVCC) $(NVCCFLAGS) -o main_cuda main_cuda.cu $(COMMON_SRCS)
 
+mpi_cuda: $(COMMON_SRCS) main_mpi_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -Xcompiler -I$(shell $(MPIXX) --showme:incdirs) \
+		-Xlinker -L$(shell $(MPIXX) --showme:libdirs) \
+		-Xlinker -lmpi \
+		-o main_mpi_cuda main_mpi_cuda.cu $(COMMON_SRCS)
+
 clean:
 	rm -f main_serial main_cuda main_mpi_cuda
 

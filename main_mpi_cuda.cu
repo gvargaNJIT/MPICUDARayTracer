@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <stdio.h>
 #include <curand_kernel.h>
+#include <mpi.h>
 
 #define HOT_NODES 64
 
@@ -84,7 +85,21 @@ __global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_node
     d_image[idx] = result;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    MPI_Init(&argc, &argv);
+
+    int rank, num_ranks;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
+    if (num_ranks != 4) {
+        if (rank == 0)
+            std::cerr << "Error: requires exactly 4 MPI ranks\n";
+        MPI_Finalize();
+        return 1;
+    }
+    cudaSetDevice(0);
+
     std::vector<material> materials;
 
     point3 camera_positions[4] = {
@@ -161,41 +176,38 @@ int main() {
     dim3 block(block_size, block_size, 1);
     dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
 
-    for (int frame = 0; frame < 4; frame++) {
-        camera cam(camera_positions[frame], lookat, vup, vfov, aspect_ratio);
+    camera cam(camera_positions[rank], lookat, vup, vfov, aspect_ratio);
+    cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
-        cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
+    ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
 
-        ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
+    cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
 
-        cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
+    std::vector<unsigned char> image_data;
+    image_data.reserve(image_width * image_height * 3);
 
-        std::vector<unsigned char> image_data;
-        image_data.reserve(image_width * image_height * 3);
-
-        for(int row = image_height-1; row >= 0; row--){
-            for(int col = 0; col < image_width; col++){
-                int i = row * image_width + col;
-                vec3 output(0,0,0);
-                for(int j=0; j<samples_per_pixel; j++){
-                    int offset = i + j * image_height*image_width;
-                    output += h_image[offset];
-                }
-                output = output/samples_per_pixel;
-                output = color(sqrt(output.x()), sqrt(output.y()), sqrt(output.z()));
-
-                auto clamp = [](double x, double min, double max) {
-                    return x < min ? min : (x > max ? max : x);
-                };
-
-                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.x(), 0.0, 1.0)));
-                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.y(), 0.0, 1.0)));
-                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.z(), 0.0, 1.0)));
+    for(int row = image_height-1; row >= 0; row--){
+        for(int col = 0; col < image_width; col++){
+            int i = row * image_width + col;
+            vec3 output(0,0,0);
+            for(int j=0; j<samples_per_pixel; j++){
+                int offset = i + j * image_height*image_width;
+                output += h_image[offset];
             }
+            output = output/samples_per_pixel;
+            output = color(sqrt(output.x()), sqrt(output.y()), sqrt(output.z()));
+
+            auto clamp = [](double x, double min, double max) {
+                return x < min ? min : (x > max ? max : x);
+            };
+
+            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.x(), 0.0, 1.0)));
+            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.y(), 0.0, 1.0)));
+            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.z(), 0.0, 1.0)));
         }
-        std::string filename = "output_" + std::to_string(frame) + ".ppm";
-        image_ppm(filename.c_str(), image_data, image_width, image_height);
     }
+    std::string filename = "output_rank" + std::to_string(rank) + ".ppm";
+    image_ppm(filename.c_str(), image_data, image_width, image_height);
 
     cudaFree(d_image);
     cudaFree(d_triangles);
@@ -203,4 +215,7 @@ int main() {
     cudaFree(d_cam);
     cudaFree(d_nodes);
     delete[] h_image;
+
+    MPI_Finalize();
+    return 0;
 }
