@@ -87,12 +87,16 @@ __global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_node
 int main() {
     std::vector<material> materials;
 
-    point3 lookfrom(0,0,5);
+    point3 camera_positions[4] = {
+        point3(0, 0, 5),
+        point3(5, 0, 2),
+        point3(0, 5, 2),
+        point3(-5, 0, 2)
+    };
+
     point3 lookat(0,0,0);
     vec3 vup(0,1,0);
     double vfov = 40.0;
-
-    camera cam(lookfrom, lookat, vup, vfov, aspect_ratio);
 
     material red, green, blue;
     red.type   = materialType::LAMBERT;
@@ -153,39 +157,45 @@ int main() {
     cudaMemcpy(d_triangles, world.objects.data(), num_triangles * sizeof(triangle), cudaMemcpyHostToDevice);
     cudaMemcpy(d_nodes, h_nodes.data(), h_nodes.size() * sizeof(bvh), cudaMemcpyHostToDevice);
     cudaMemcpy(d_materials, h_materials, materials.size() * sizeof(material), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
     dim3 block(block_size, block_size, 1);
     dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
 
-    ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
+    for (int frame = 0; frame < 4; frame++) {
+        camera cam(camera_positions[frame], lookat, vup, vfov, aspect_ratio);
 
-    cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
+        cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
-    std::vector<unsigned char> image_data;
-    image_data.reserve(image_width * image_height * 3);
+        ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
 
-    for(int row = image_height-1; row >= 0; row--){
-        for(int col = 0; col < image_width; col++){
-            int i = row * image_width + col;
-            vec3 output(0,0,0);
-            for(int j=0; j<samples_per_pixel; j++){
-                int offset = i + j * image_height*image_width;
-                output += h_image[offset];
+        cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
+
+        std::vector<unsigned char> image_data;
+        image_data.reserve(image_width * image_height * 3);
+
+        for(int row = image_height-1; row >= 0; row--){
+            for(int col = 0; col < image_width; col++){
+                int i = row * image_width + col;
+                vec3 output(0,0,0);
+                for(int j=0; j<samples_per_pixel; j++){
+                    int offset = i + j * image_height*image_width;
+                    output += h_image[offset];
+                }
+                output = output/samples_per_pixel;
+                output = color(sqrt(output.x()), sqrt(output.y()), sqrt(output.z()));
+
+                auto clamp = [](double x, double min, double max) {
+                    return x < min ? min : (x > max ? max : x);
+                };
+
+                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.x(), 0.0, 1.0)));
+                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.y(), 0.0, 1.0)));
+                image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.z(), 0.0, 1.0)));
             }
-            output = output/samples_per_pixel;
-            output = color(sqrt(output.x()), sqrt(output.y()), sqrt(output.z()));
-
-            auto clamp = [](double x, double min, double max) {
-                return x < min ? min : (x > max ? max : x);
-            };
-
-            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.x(), 0.0, 1.0)));
-            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.y(), 0.0, 1.0)));
-            image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.z(), 0.0, 1.0)));
         }
+        std::string filename = "output_" + std::to_string(frame) + ".ppm";
+        image_ppm(filename.c_str(), image_data, image_width, image_height);
     }
-    image_ppm("output.ppm", image_data, image_width, image_height);
 
     cudaFree(d_image);
     cudaFree(d_triangles);
