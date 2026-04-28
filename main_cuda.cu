@@ -14,13 +14,14 @@
 #include <algorithm>
 #include <stdio.h>
 #include <curand_kernel.h>
+#include <chrono>
 
 #define HOT_NODES 64
 
 const double aspect_ratio = 16.0 / 9.0;
-const int image_width = 400;
+const int image_width = 1920;
 const int image_height = static_cast<int>(image_width / aspect_ratio);
-const int samples_per_pixel = 10;
+const int samples_per_pixel = 100;
 
 const int block_size = 16;
 
@@ -158,15 +159,20 @@ int main() {
     cudaMemcpy(d_nodes, h_nodes.data(), h_nodes.size() * sizeof(bvh), cudaMemcpyHostToDevice);
     cudaMemcpy(d_materials, h_materials, materials.size() * sizeof(material), cudaMemcpyHostToDevice);
 
-    dim3 block(block_size, block_size, 1);
+    dim3 block(block_size, block_size, 4);
     dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
 
+    auto total_start = std::chrono::high_resolution_clock::now();
+
     for (int frame = 0; frame < 4; frame++) {
+        auto frame_start = std::chrono::high_resolution_clock::now();
+
         camera cam(camera_positions[frame], lookat, vup, vfov, aspect_ratio);
 
         cudaMemcpy(d_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
         ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
+        cudaDeviceSynchronize();
 
         cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
 
@@ -193,9 +199,17 @@ int main() {
                 image_data.push_back(static_cast<unsigned char>(255.999 * clamp(output.z(), 0.0, 1.0)));
             }
         }
+        auto frame_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> frame_time = frame_end - frame_start;
+        std::cout << "Frame " << frame << ": " << frame_time.count() << "s\n";
+
         std::string filename = "output_" + std::to_string(frame) + ".ppm";
         image_ppm(filename.c_str(), image_data, image_width, image_height);
     }
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> total_time = total_end - total_start;
+    std::cout << "Total: " << total_time.count() << "s\n";
 
     cudaFree(d_image);
     cudaFree(d_triangles);

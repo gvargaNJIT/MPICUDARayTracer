@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 
 color ray_color(const ray& r, const std::vector<bvh>& nodes, const std::vector<triangle>& tris, const std::vector<material>& materials, int depth) {
     hit_record rec;
@@ -37,7 +38,7 @@ color ray_color(const ray& r, const std::vector<bvh>& nodes, const std::vector<t
 
 int main() {
     const double aspect_ratio = 16.0 / 9.0;
-    const int image_width = 400;
+    const int image_width = 1920;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     std::vector<material> materials;
 
@@ -90,12 +91,14 @@ int main() {
     std::vector<bvh> flat_nodes;
     build(world.objects, 0, world.objects.size(), flat_nodes);
 
-    std::vector<unsigned char> image_data;
-    image_data.reserve(image_width * image_height * 3);
+    auto total_start = std::chrono::high_resolution_clock::now();
 
     for (int frame = 0; frame < 4; frame++) {
+        auto frame_start = std::chrono::high_resolution_clock::now();
+        std::vector<unsigned char> image_data;
+        image_data.reserve(image_width * image_height * 3);
         camera cam(camera_positions[frame], lookat, vup, vfov, aspect_ratio);
-        int samples_per_pixel = 10;
+        int samples_per_pixel = 100;
         for (int j = image_height-1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
                 color pixel_color(0, 0, 0);
@@ -120,9 +123,15 @@ int main() {
                 image_data.push_back(static_cast<unsigned char>(255.999 * clamp(pixel_color.z(), 0.0, 1.0)));
             }
         }
+    auto frame_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> frame_time = frame_end - frame_start;
+    std::cout << "Frame " << frame << ": " << frame_time.count() << "s\n";
+
     std::string filename = "output_" + std::to_string(frame) + ".ppm";
     image_ppm(filename.c_str(), image_data, image_width, image_height);
-    
-    image_data.clear();
     }
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> total_time = total_end - total_start;
+    std::cout << "Total: " << total_time.count() << "s\n";
 }
