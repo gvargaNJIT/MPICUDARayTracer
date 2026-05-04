@@ -26,10 +26,8 @@ const int samples_per_pixel = 100;
 const int block_size = 16;
 
 __global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_nodes, int num_triangles, material* materials, vec3* d_image, int depth) {
-    curandState state;
-    int col = threadIdx.x+blockDim.x*blockIdx.x;
-    int row = threadIdx.y+blockDim.y*blockIdx.y;
-    int dep = threadIdx.z+blockDim.z*blockIdx.z;
+    int col = threadIdx.x + blockDim.x * blockIdx.x;
+    int row = threadIdx.y + blockDim.y * blockIdx.y;
     int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
     __shared__ char s_cam_buf[sizeof(camera)];
@@ -46,43 +44,48 @@ __global__ void ray_color(camera* cam, bvh* nodes, triangle* world, int num_node
 
     __syncthreads();
 
-    if (col >= image_width || row >= image_height){
-        return;
-    }
+    if (col >= image_width || row >= image_height) return;
 
-    int idx = dep * image_height * image_width + row * image_width + col;
-    curand_init(1234, idx, 0, &state);
+    int pixel_idx = row * image_width + col;
+    curandState state;
+    curand_init(1234, pixel_idx, 0, &state);
 
-    vec3 result = color(0,0,0);
-    double u = (col + curand_uniform(&state)) / (image_width - 1);
-    double v = (row + curand_uniform(&state)) / (image_height - 1);
-    ray r = s_cam->get_ray(u, v);
+    vec3 accum(0,0,0);
 
-    vec3 attenuation = color(1.0, 1.0, 1.0);
+    for (int s = 0; s < samples_per_pixel; s++) {
+        double u = (col + curand_uniform(&state)) / (image_width - 1);
+        double v = (row + curand_uniform(&state)) / (image_height - 1);
 
-    for (int i = 0; i < depth; i++) {
-        hit_record rec;
-        
-        if (bvh_hit(r, 0.001, 1e30, rec, nodes, s_nodes, nodes_to_cache, world)) {
-            ray scattered;
-            color bounce_attenuation;
-            color emitted_light = emitted(materials[rec.material_id]);
-            result += attenuation * emitted_light;
+        ray r = s_cam->get_ray(u, v);
+        vec3 attenuation(1.0, 1.0, 1.0);
+        vec3 result(0, 0, 0);
 
-            if (scatter(materials[rec.material_id], r, rec.p, rec.normal, bounce_attenuation, scattered, &state)) {
-                attenuation *= bounce_attenuation;
-                r = scattered;
+        for (int i = 0; i < depth; i++) {
+            hit_record rec;
+            if (bvh_hit(r, 0.001, 1e30, rec, nodes, s_nodes, nodes_to_cache, world)) {
+                ray scattered;
+                vec3 bounce_attenuation;
+                vec3 emitted_light = emitted(materials[rec.material_id]);
+
+                result += attenuation * emitted_light;
+
+                if (scatter(materials[rec.material_id], r, rec.p, rec.normal, bounce_attenuation, scattered, &state)) {
+                    attenuation *= bounce_attenuation;
+                    r = scattered;
+                } else {
+                    break;
+                }
             } else {
+                vec3 unit_dir = unit_vector(r.direction());
+                double t = 0.5 * (unit_dir.y() + 1.0);
+                result += attenuation * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0));
                 break;
             }
-        } else {
-            vec3 unit_dir = unit_vector(r.direction());
-            double t = 0.5*(unit_dir.y() + 1.0);
-            result += attenuation * ((1.0-t)*color(1.0,1.0,1.0) + t*color(0.5,0.7,1.0));
-            break;
         }
+        accum += result;
     }
-    d_image[idx] = result;
+
+    d_image[pixel_idx] = accum / (double)samples_per_pixel;
 }
 
 int main() {
@@ -146,11 +149,11 @@ int main() {
     triangle* d_triangles;
     material* d_materials;
     camera* d_cam;
-    vec3* h_image = new vec3[image_width * image_height * samples_per_pixel];
+    vec3* h_image = new vec3[image_width * image_height];
     bvh* d_nodes;
 
     cudaMalloc(&d_nodes, h_nodes.size() * sizeof(bvh));
-    cudaMalloc(&d_image, image_height*image_width*samples_per_pixel * sizeof(vec3));
+    cudaMalloc(&d_image, image_height * image_width * sizeof(vec3));
     cudaMalloc(&d_triangles, num_triangles * sizeof(triangle));
     cudaMalloc(&d_materials, materials.size() * sizeof(material));
     cudaMalloc(&d_cam, sizeof(camera));
@@ -159,8 +162,8 @@ int main() {
     cudaMemcpy(d_nodes, h_nodes.data(), h_nodes.size() * sizeof(bvh), cudaMemcpyHostToDevice);
     cudaMemcpy(d_materials, h_materials, materials.size() * sizeof(material), cudaMemcpyHostToDevice);
 
-    dim3 block(block_size, block_size, 4);
-    dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y, samples_per_pixel);
+    dim3 block(block_size, block_size);
+    dim3 grid((image_width + block.x-1)/block.x, (image_height + block.y-1)/block.y);
 
     auto total_start = std::chrono::high_resolution_clock::now();
 
@@ -174,7 +177,7 @@ int main() {
         ray_color<<<grid, block>>>(d_cam, d_nodes, d_triangles, h_nodes.size(), num_triangles, d_materials, d_image, 4);
         cudaDeviceSynchronize();
 
-        cudaMemcpy(h_image, d_image, image_height*image_width*samples_per_pixel * sizeof(vec3), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_image, d_image, image_width * image_height * sizeof(vec3), cudaMemcpyDeviceToHost);
 
         std::vector<unsigned char> image_data;
         image_data.reserve(image_width * image_height * 3);
@@ -182,12 +185,7 @@ int main() {
         for(int row = image_height-1; row >= 0; row--){
             for(int col = 0; col < image_width; col++){
                 int i = row * image_width + col;
-                vec3 output(0,0,0);
-                for(int j=0; j<samples_per_pixel; j++){
-                    int offset = i + j * image_height*image_width;
-                    output += h_image[offset];
-                }
-                output = output/samples_per_pixel;
+                vec3 output = h_image[i];
                 output = color(sqrt(output.x()), sqrt(output.y()), sqrt(output.z()));
 
                 auto clamp = [](double x, double min, double max) {
